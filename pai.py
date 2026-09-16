@@ -94,6 +94,26 @@ def confirm_action(action: str) -> bool:
     answer = input(f"PAI хочет выполнить действие: {action}\nРазрешить? [y/N] ")
     return answer.strip().lower() in ("y", "yes", "д", "да")
 
+def git_diff() -> str:
+    try:
+        process = subprocess.run(
+            ["git", "-C", str(Path.home() / "pai"), "diff", "--", "pai.py"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+
+        if process.returncode != 0:
+            return f"Ошибка git diff:\n{process.stderr}"
+
+        return process.stdout if process.stdout else "(изменений в pai.py нет)"
+
+    except subprocess.TimeoutExpired:
+        return "Ошибка: git diff превысил лимит времени 10 секунд."
+
+    except Exception as e:
+        return f"Ошибка git diff: {e}"
+
 def execute_shell(command: str) -> str:
     try:
         process = subprocess.run(
@@ -260,6 +280,18 @@ tools = [
     },
 },
 
+{
+    "type": "function",
+    "function": {
+        "name": "git_diff",
+        "description": "Показать текущие изменения в файле pai.py относительно последнего Git-коммита.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+},
+
 ]
 
 TOOL_PERMISSIONS = {
@@ -268,6 +300,7 @@ TOOL_PERMISSIONS = {
     "write_file": "confirm",
     "delete_file": "confirm",
     "execute_shell": "confirm",
+    "git_diff": "safe",
 }
 
 messages = [
@@ -286,100 +319,81 @@ messages = [
 ]
 
 
-print("PAI запущен.")
-print("Для выхода: exit")
-print(f"Workspace: {WORKSPACE}")
-print()
+if __name__ == "__main__":
+    print("PAI запущен.")
+    print("Для выхода: exit")
+    print(f"Workspace: {WORKSPACE}")
+    print()
 
-
-while True:
-    try:
-        user_input = input("Ты > ")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        break
-
-    if user_input.strip().lower() == "exit":
-        break
-
-    if not user_input.strip():
-        continue
-
-    messages.append({
-        "role": "user",
-        "content": user_input,
-    })
 
     while True:
-        response = client.chat.completions.create(
-            model="kr/claude-sonnet-4.5",
-            messages=messages,
-            tools=tools,
-        )
-
-        message = response.choices[0].message
-
-        assistant_message = {
-            "role": "assistant",
-            "content": message.content or "",
-        }
-
-        if message.tool_calls:
-            assistant_message["tool_calls"] = [
-                {
-                    "id": tool_call.id,
-                    "type": "function",
-                    "function": {
-                        "name": tool_call.function.name,
-                        "arguments": tool_call.function.arguments,
-                    },
-                }
-                for tool_call in message.tool_calls
-            ]
-
-        messages.append(assistant_message)
-
-        if not message.tool_calls:
-            print(f"PAI > {message.content}")
+        try:
+            user_input = input("Ты > ")
+        except (EOFError, KeyboardInterrupt):
+            print()
             break
 
-        for tool_call in message.tool_calls:
+        if user_input.strip().lower() == "exit":
+            break
 
-            try:
-                arguments = json.loads(tool_call.function.arguments)
-            except Exception as e:
-                result = f"Ошибка разбора аргументов инструмента: {e}"
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result,
-                })
-                continue
+        if not user_input.strip():
+            continue
+
+        messages.append({
+            "role": "user",
+            "content": user_input,
+        })
+
+        while True:
+            response = client.chat.completions.create(
+                model="kr/claude-sonnet-4.5",
+                messages=messages,
+                tools=tools,
+            )
+
+            message = response.choices[0].message
+
+            assistant_message = {
+                "role": "assistant",
+                "content": message.content or "",
+            }
+
+            if message.tool_calls:
+                assistant_message["tool_calls"] = [
+                    {
+                        "id": tool_call.id,
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.function.name,
+                            "arguments": tool_call.function.arguments,
+                        },
+                    }
+                    for tool_call in message.tool_calls
+                ]
+
+            messages.append(assistant_message)
+
+            if not message.tool_calls:
+                print(f"PAI > {message.content}")
+                break
+
+            for tool_call in message.tool_calls:
+
+                try:
+                    arguments = json.loads(tool_call.function.arguments)
+                except Exception as e:
+                    result = f"Ошибка разбора аргументов инструмента: {e}"
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": result,
+                    })
+                    continue
   
-            permission = TOOL_PERMISSIONS.get(tool_call.function.name)
+                permission = TOOL_PERMISSIONS.get(tool_call.function.name)
 
-            if permission is None:
-                result = "Ошибка: инструмент не имеет настроенного уровня доступа."
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result,
-                })
-                continue
-
-            if permission == "confirm":
-
-                if tool_call.function.name == "write_file":
-                    action = f"записать файл {arguments['path']}"
-                elif tool_call.function.name == "delete_file":
-                    action = f"удалить файл {arguments['path']}"
-                elif tool_call.function.name == "execute_shell":
-                    action = f"выполнить команду: {arguments['command']}"
-                else:
-                    action = f"выполнить инструмент {tool_call.function.name}"
-
-                if not confirm_action(action):
-                    result = "Операция отменена пользователем."
+                if permission is None:
+                    result = "Ошибка: инструмент не имеет настроенного уровня доступа."
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -387,49 +401,75 @@ while True:
                     })
                     continue
 
-            if tool_call.function.name == "list_directory":
-                try:
-                    result = list_directory(arguments["path"])
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                if permission == "confirm":
 
-            elif tool_call.function.name == "create_directory":
-                try:
-                    result = create_directory(arguments["path"])
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                    if tool_call.function.name == "write_file":
+                        action = f"записать файл {arguments['path']}"
+                    elif tool_call.function.name == "delete_file":
+                        action = f"удалить файл {arguments['path']}"
+                    elif tool_call.function.name == "execute_shell":
+                        action = f"выполнить команду: {arguments['command']}"
+                    else:
+                        action = f"выполнить инструмент {tool_call.function.name}"
 
-            elif tool_call.function.name == "read_file":
-                try:
-                    result = read_file(arguments["path"])
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                    if not confirm_action(action):
+                        result = "Операция отменена пользователем."
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": result,
+                        })
+                        continue
 
-            elif tool_call.function.name == "write_file":
-                try:
-                    result = write_file(
-                        arguments["path"],
-                        arguments["content"],
-                    )
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                if tool_call.function.name == "list_directory":
+                    try:
+                        result = list_directory(arguments["path"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
 
-            elif tool_call.function.name == "delete_file":
-                try:
-                    result = delete_file(arguments["path"])
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                elif tool_call.function.name == "create_directory":
+                    try:
+                        result = create_directory(arguments["path"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
 
-            elif tool_call.function.name == "execute_shell":
-                try:
-                    result = execute_shell(arguments["command"])
-                except Exception as e:
-                    result = f"Ошибка инструмента: {e}"
+                elif tool_call.function.name == "read_file":
+                    try:
+                        result = read_file(arguments["path"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
 
-            else:
-                result = "Ошибка: неизвестный инструмент."          
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": result,
-            })
+                elif tool_call.function.name == "write_file":
+                    try:
+                        result = write_file(
+                            arguments["path"],
+                            arguments["content"],
+                        )
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "delete_file":
+                    try:
+                        result = delete_file(arguments["path"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "execute_shell":
+                    try:
+                        result = execute_shell(arguments["command"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "git_diff":
+                    try:
+                        result = git_diff()
+                    except Exception as e:
+                       result = f"Ошибка инструмента: {e}"
+
+                else:
+                    result = "Ошибка: неизвестный инструмент."          
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result,
+                })
