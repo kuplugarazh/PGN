@@ -91,6 +91,24 @@ def write_file(path: str, content: str) -> str:
     except OSError as e:
         return f"Ошибка записи файла: {e}"
 
+def write_project_file(path: str, content: str) -> str:
+    target = (Path.home() / "pai" / path).resolve()
+
+    try:
+        target.relative_to((Path.home() / "pai").resolve())
+    except ValueError:
+        return "Ошибка: нельзя записывать файлы за пределами проекта PAI."
+
+    if target.exists() and target.is_dir():
+        return f"Ошибка: указанный путь является директорией: {target}"
+
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+        return f"Файл записан: {target}"
+    except OSError as e:
+        return f"Ошибка записи файла: {e}"
+
 def read_project_file(path: str) -> str:
     target = (Path.home() / "pai" / path).resolve()
 
@@ -404,6 +422,28 @@ tools = [
 {
     "type": "function",
     "function": {
+        "name": "write_project_file",
+        "description": "Записать UTF-8 файл внутри проекта PAI. Требует подтверждения пользователя.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Путь к файлу относительно ~/pai.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Новое содержимое файла.",
+                },
+            },
+            "required": ["path", "content"],
+        },
+    },
+},
+
+{
+    "type": "function",
+    "function": {
         "name": "read_project_file",
         "description": "Прочитать UTF-8 файл внутри проекта PAI.",
         "parameters": {
@@ -477,6 +517,7 @@ TOOL_PERMISSIONS = {
     "git_diff": "safe",
     "run_tests": "safe",
     "read_project_file": "safe",
+    "write_project_file": "confirm",
     "read_source": "safe",
     "edit_source": "confirm",
     "check_syntax": "safe",
@@ -655,6 +696,12 @@ if __name__ == "__main__":
                 elif tool_call.function.name == "run_tests":
                     try:
                         result = run_tests()
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "write_project_file":
+                    try:
+                        result = write_project_file(arguments["path"], arguments["content"])
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
 
