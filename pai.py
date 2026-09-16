@@ -94,6 +94,34 @@ def confirm_action(action: str) -> bool:
     answer = input(f"PAI хочет выполнить действие: {action}\nРазрешить? [y/N] ")
     return answer.strip().lower() in ("y", "yes", "д", "да")
 
+def run_tests() -> str:
+    try:
+        process = subprocess.run(
+            ["pytest", "-q", "test_pai.py"],
+            cwd=str(Path.home() / "pai"),
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+        output = [
+            f"Код завершения: {process.returncode}",
+        ]
+
+        if process.stdout:
+            output.append(f"STDOUT:\n{process.stdout[:20000]}")
+
+        if process.stderr:
+            output.append(f"STDERR:\n{process.stderr[:20000]}")
+
+        return "\n".join(output)
+
+    except subprocess.TimeoutExpired:
+        return "Ошибка: тесты превысили лимит времени 60 секунд."
+
+    except Exception as e:
+        return f"Ошибка запуска тестов: {e}"
+
 def git_diff() -> str:
     try:
         process = subprocess.run(
@@ -292,6 +320,18 @@ tools = [
     },
 },
 
+{
+    "type": "function",
+    "function": {
+        "name": "run_tests",
+        "description": "Запустить автоматические тесты PAI из файла test_pai.py.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+},
+
 ]
 
 TOOL_PERMISSIONS = {
@@ -301,6 +341,7 @@ TOOL_PERMISSIONS = {
     "delete_file": "confirm",
     "execute_shell": "confirm",
     "git_diff": "safe",
+    "run_tests": "safe",
 }
 
 messages = [
@@ -314,7 +355,14 @@ messages = [
 Никогда не утверждай, что выполнил действие, если соответствующий инструмент не был вызван.
 
 Когда тебе нужен инструмент, используй его.
-После получения результата инструмента проанализируй результат и продолжи выполнение задачи.""",
+После получения результата инструмента проанализируй результат и продолжи выполнение задачи.
+
+Правила выбора инструментов:
+- Если задача связана с запуском автоматических тестов PAI, используй run_tests, а не execute_shell.
+- Если задача связана с просмотром изменений pai.py, используй git_diff, а не execute_shell.
+- Используй execute_shell только тогда, когда для задачи нет подходящего специализированного инструмента.
+- После изменения исходного кода сначала запусти run_tests, затем используй git_diff для проверки изменений.
+- Никогда не утверждай, что действие выполнено успешно, если соответствующий инструмент не был вызван или вернул ошибку."""
     }
 ]
 
@@ -380,7 +428,7 @@ if __name__ == "__main__":
             for tool_call in message.tool_calls:
 
                 try:
-                    arguments = json.loads(tool_call.function.arguments)
+                    arguments = json.loads(tool_call.function.arguments or "{}")
                 except Exception as e:
                     result = f"Ошибка разбора аргументов инструмента: {e}"
                     messages.append({
@@ -464,7 +512,12 @@ if __name__ == "__main__":
                     try:
                         result = git_diff()
                     except Exception as e:
-                       result = f"Ошибка инструмента: {e}"
+                        result = f"Ошибка инструмента: {e}"
+                elif tool_call.function.name == "run_tests":
+                    try:
+                        result = run_tests()
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
 
                 else:
                     result = "Ошибка: неизвестный инструмент."          
