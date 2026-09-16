@@ -195,6 +195,29 @@ def delete_file(path: str) -> str:
         return f"Ошибка удаления файла: {e}"
 
 
+def edit_source(old_text: str, new_text: str) -> str:
+    """Заменить ровно одно совпадение текста в собственном исходном коде."""
+    pai_file = Path(__file__)
+    try:
+        content = pai_file.read_text(encoding="utf-8")
+    except OSError as e:
+        return f"Ошибка чтения собственного исходника: {e}"
+
+    count = content.count(old_text)
+    if count == 0:
+        return "Ошибка: исходный фрагмент не найден."
+    if count > 1:
+        return f"Ошибка: исходный фрагмент найден {count} раз. Требуется ровно одно совпадение."
+
+    updated = content.replace(old_text, new_text, 1)
+    try:
+        pai_file.write_text(updated, encoding="utf-8")
+    except OSError as e:
+        return f"Ошибка записи собственного исходника: {e}"
+
+    return "Исходный код успешно изменён."
+
+
 def read_source() -> str:
     """Прочитать полный исходный код текущего файла pai.py"""
     try:
@@ -357,6 +380,28 @@ tools = [
     },
 },
 
+{
+    "type": "function",
+    "function": {
+        "name": "edit_source",
+        "description": "Заменить ровно одно совпадение текста в собственном исходном коде.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "old_text": {
+                    "type": "string",
+                    "description": "Исходный текст для замены.",
+                },
+                "new_text": {
+                    "type": "string",
+                    "description": "Новый текст.",
+                },
+            },
+            "required": ["old_text", "new_text"],
+        },
+    },
+},
+
 
 ]
 
@@ -369,6 +414,7 @@ TOOL_PERMISSIONS = {
     "git_diff": "safe",
     "run_tests": "safe",
     "read_source": "safe",
+    "edit_source": "confirm",
 }
 
 messages = [
@@ -387,6 +433,9 @@ messages = [
 Правила выбора инструментов:
 - Если задача связана с запуском автоматических тестов PAI, используй run_tests, а не execute_shell.
 - Если задача связана с просмотром изменений pai.py, используй git_diff, а не execute_shell.
+ - Если задача связана с чтением собственного исходного кода, используй read_source, а не execute_shell.
+ - Если задача связана с изменением собственного исходного кода, используй edit_source, а не execute_shell.
+ - Никогда не используй execute_shell для обхода специализированного инструмента, если такой инструмент уже доступен.
 - Используй execute_shell только тогда, когда для задачи нет подходящего специализированного инструмента.
 - После изменения исходного кода сначала запусти run_tests, затем используй git_diff для проверки изменений.
 - Никогда не утверждай, что действие выполнено успешно, если соответствующий инструмент не был вызван или вернул ошибку."""
@@ -452,6 +501,8 @@ if __name__ == "__main__":
                 print(f"PAI > {message.content}")
                 break
 
+            action_cancelled = False
+
             for tool_call in message.tool_calls:
 
                 try:
@@ -489,12 +540,8 @@ if __name__ == "__main__":
 
                     if not confirm_action(action):
                         result = "Операция отменена пользователем."
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": result,
-                        })
-                        continue
+                        action_cancelled = True
+                        break
 
                 if tool_call.function.name == "list_directory":
                     try:
@@ -552,6 +599,12 @@ if __name__ == "__main__":
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
 
+                elif tool_call.function.name == "edit_source":
+                    try:
+                        result = edit_source(arguments["old_text"], arguments["new_text"])
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
                 else:
                     result = "Ошибка: неизвестный инструмент."          
                 messages.append({
@@ -559,3 +612,7 @@ if __name__ == "__main__":
                     "tool_call_id": tool_call.id,
                     "content": result,
                 })
+
+            if action_cancelled:
+                print("PAI > Действие отменено пользователем.")
+                break
