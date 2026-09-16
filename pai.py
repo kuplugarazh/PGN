@@ -2,6 +2,7 @@ import json
 import py_compile
 import os
 import subprocess
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from openai import OpenAI
@@ -576,6 +577,28 @@ TOOL_PERMISSIONS = {
     "list_project_directory": "safe",
 }
 
+@dataclass
+class TaskState:
+    goal: str
+    plan: list[str] = field(default_factory=list)
+    current_step: int = 0
+
+    def format(self) -> str:
+        if not self.plan:
+            return "План отсутствует."
+
+        lines = ["Текущий план:"]
+        for index, step in enumerate(self.plan, start=1):
+            if index - 1 < self.current_step:
+                status = "✓"
+            elif index - 1 == self.current_step:
+                status = "→"
+            else:
+                status = "○"
+
+            lines.append(f"{status} {index}. {step}")
+
+        return chr(10).join(lines)
 messages = [
     {
         "role": "system",
