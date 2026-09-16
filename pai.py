@@ -1,4 +1,5 @@
 import json
+import py_compile
 import os
 import subprocess
 from pathlib import Path
@@ -193,6 +194,17 @@ def delete_file(path: str) -> str:
         return f"Файл удалён: {target}"
     except OSError as e:
         return f"Ошибка удаления файла: {e}"
+
+
+def check_syntax() -> str:
+    """Проверить синтаксис собственного исходного кода pai.py."""
+    try:
+        py_compile.compile(str(Path(__file__)), doraise=True)
+        return "Синтаксис pai.py корректен."
+    except py_compile.PyCompileError as e:
+        return f"Ошибка синтаксиса pai.py: {e}"
+    except Exception as e:
+        return f"Ошибка проверки синтаксиса: {e}"
 
 
 def edit_source(old_text: str, new_text: str) -> str:
@@ -402,6 +414,18 @@ tools = [
     },
 },
 
+{
+    "type": "function",
+    "function": {
+        "name": "check_syntax",
+        "description": "Проверить синтаксис собственного исходного кода pai.py.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+},
+
 
 ]
 
@@ -415,6 +439,7 @@ TOOL_PERMISSIONS = {
     "run_tests": "safe",
     "read_source": "safe",
     "edit_source": "confirm",
+    "check_syntax": "safe",
 }
 
 messages = [
@@ -596,6 +621,12 @@ if __name__ == "__main__":
                 elif tool_call.function.name == "read_source":
                     try:
                         result = read_source()
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "check_syntax":
+                    try:
+                        result = check_syntax()
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
 
