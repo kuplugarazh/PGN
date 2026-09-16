@@ -195,6 +195,19 @@ def delete_file(path: str) -> str:
         return f"Ошибка удаления файла: {e}"
 
 
+def read_source() -> str:
+    """Прочитать полный исходный код текущего файла pai.py"""
+    try:
+        pai_file = Path.home() / "pai" / "pai.py"
+        return pai_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return "Ошибка: файл pai.py не найден."
+    except UnicodeDecodeError:
+        return "Ошибка: файл pai.py не является UTF-8 текстовым файлом."
+    except OSError as e:
+        return f"Ошибка чтения файла pai.py: {e}"
+
+
 tools = [
     {
         "type": "function",
@@ -332,6 +345,19 @@ tools = [
     },
 },
 
+{
+    "type": "function",
+    "function": {
+        "name": "read_source",
+        "description": "Прочитать полный текст текущего файла pai.py и вернуть его как строку.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+        },
+    },
+},
+
+
 ]
 
 TOOL_PERMISSIONS = {
@@ -342,6 +368,7 @@ TOOL_PERMISSIONS = {
     "execute_shell": "confirm",
     "git_diff": "safe",
     "run_tests": "safe",
+    "read_source": "safe",
 }
 
 messages = [
@@ -516,6 +543,12 @@ if __name__ == "__main__":
                 elif tool_call.function.name == "run_tests":
                     try:
                         result = run_tests()
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "read_source":
+                    try:
+                        result = read_source()
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
 
