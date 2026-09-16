@@ -137,7 +137,7 @@ def confirm_action(action: str) -> bool:
 def run_tests() -> str:
     try:
         process = subprocess.run(
-            ["pytest", "-q", "test_pai.py"],
+            ["pytest", "-q"],
             cwd=str(Path.home() / "pai"),
             capture_output=True,
             text=True,
@@ -161,11 +161,20 @@ def run_tests() -> str:
 
     except Exception as e:
         return f"Ошибка запуска тестов: {e}"
-
-def git_diff() -> str:
+def git_diff(path: str = ".") -> str:
     try:
+        project_root = (Path.home() / "pai").resolve()
+        target = (project_root / path).resolve()
+
+        try:
+            target.relative_to(project_root)
+        except ValueError:
+            return "Ошибка: нельзя смотреть diff за пределами проекта PAI."
+
+        relative_path = target.relative_to(project_root)
+
         process = subprocess.run(
-            ["git", "-C", str(Path.home() / "pai"), "diff", "--", "pai.py"],
+            ["git", "-C", str(project_root), "diff", "--", str(relative_path)],
             capture_output=True,
             text=True,
             timeout=10,
@@ -174,14 +183,13 @@ def git_diff() -> str:
         if process.returncode != 0:
             return f"Ошибка git diff:\n{process.stderr}"
 
-        return process.stdout if process.stdout else "(изменений в pai.py нет)"
+        return process.stdout if process.stdout else f"(изменений в {relative_path} нет)"
 
     except subprocess.TimeoutExpired:
         return "Ошибка: git diff превысил лимит времени 10 секунд."
 
     except Exception as e:
         return f"Ошибка git diff: {e}"
-
 def execute_shell(command: str) -> str:
     try:
         process = subprocess.run(
@@ -396,17 +404,21 @@ tools = [
 },
 
 {
-    "type": "function",
+ "type": "function",
     "function": {
         "name": "git_diff",
-        "description": "Показать текущие изменения в файле pai.py относительно последнего Git-коммита.",
+        "description": "Показать git diff файла или каталога внутри проекта PAI.",
         "parameters": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Путь относительно корня проекта PAI. По умолчанию '.'.",
+                },
+            },
         },
     },
 },
-
 {
     "type": "function",
     "function": {
@@ -693,7 +705,7 @@ if __name__ == "__main__":
 
                 elif tool_call.function.name == "git_diff":
                     try:
-                        result = git_diff()
+                        result = git_diff(arguments.get("path", "."))
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
                 elif tool_call.function.name == "run_tests":
