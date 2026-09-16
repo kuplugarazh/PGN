@@ -35,6 +35,28 @@ def list_directory(path: str) -> str:
 
     return "\n".join(items) if items else "(пусто)"
 
+def list_project_directory(path: str) -> str:
+    project_root = (Path.home() / "pai").resolve()
+    target = (project_root / path).resolve()
+
+    try:
+        target.relative_to(project_root)
+    except ValueError:
+        return "Ошибка: нельзя просматривать директории за пределами проекта PAI."
+
+    if not target.exists():
+        return f"Ошибка: директория не существует: {target}"
+
+    if not target.is_dir():
+        return f"Ошибка: это не директория: {target}"
+
+    items = []
+    for item in sorted(target.iterdir()):
+        kind = "DIR " if item.is_dir() else "FILE"
+        items.append(f"{kind} {item.name}")
+
+    return "\n".join(items) if items else "(пусто)"
+
 def create_directory(path: str) -> str:
     target = (WORKSPACE / path).resolve()
 
@@ -309,6 +331,24 @@ tools = [
         },
     },
 
+  {
+    "type": "function",
+    "function": {
+        "name": "list_project_directory",
+        "description": "Показать содержимое директории внутри проекта PAI.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Путь относительно корня проекта PAI.",
+                }
+            },
+            "required": ["path"],
+        },
+    },
+},
+
    {
         "type": "function",
         "function": {
@@ -533,6 +573,7 @@ TOOL_PERMISSIONS = {
     "read_source": "safe",
     "edit_source": "confirm",
     "check_syntax": "safe",
+    "list_project_directory": "safe",
 }
 
 messages = [
@@ -556,6 +597,9 @@ messages = [
 - Никогда не используй execute_shell для обхода специализированного инструмента, если такой инструмент уже доступен.
 - Используй execute_shell только тогда, когда для задачи нет подходящего специализированного инструмента.
 - Для просмотра содержимого директории используй list_directory, а не execute_shell.
+- Для просмотра содержимого директории проекта PAI используй list_project_directory.
+- Для просмотра содержимого PAIWorkspace используй list_directory.
+- Не путай PAIWorkspace и проект PAI.
 - После ошибки инструмента сначала определи, есть ли специализированный инструмент для диагностики или исправления проблемы. Используй его вместо execute_shell.
 - Перед изменением файла проекта сначала прочитай его через подходящий инструмент.
 - После изменения исходного кода сначала проверь синтаксис через check_syntax.
@@ -671,6 +715,9 @@ if __name__ == "__main__":
                         result = list_directory(arguments["path"])
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "list_project_directory":
+                        result = list_project_directory(arguments["path"])
 
                 elif tool_call.function.name == "create_directory":
                     try:
