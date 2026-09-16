@@ -91,6 +91,27 @@ def write_file(path: str, content: str) -> str:
     except OSError as e:
         return f"Ошибка записи файла: {e}"
 
+def read_project_file(path: str) -> str:
+    target = (Path.home() / "pai" / path).resolve()
+
+    try:
+        target.relative_to((Path.home() / "pai").resolve())
+    except ValueError:
+        return "Ошибка: нельзя читать файлы за пределами проекта PAI."
+
+    if not target.exists():
+        return f"Ошибка: файл не существует: {target}"
+
+    if not target.is_file():
+        return f"Ошибка: это не файл: {target}"
+
+    try:
+        return target.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return "Ошибка: файл не является UTF-8 текстовым файлом."
+    except OSError as e:
+        return f"Ошибка чтения файла: {e}"
+
 def confirm_action(action: str) -> bool:
     answer = input(f"PAI хочет выполнить действие: {action}\nРазрешить? [y/N] ")
     return answer.strip().lower() in ("y", "yes", "д", "да")
@@ -383,6 +404,24 @@ tools = [
 {
     "type": "function",
     "function": {
+        "name": "read_project_file",
+        "description": "Прочитать UTF-8 файл внутри проекта PAI.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Путь к файлу относительно ~/pai.",
+                },
+            },
+            "required": ["path"],
+        },
+    },
+},
+
+{
+    "type": "function",
+    "function": {
         "name": "read_source",
         "description": "Прочитать полный текст текущего файла pai.py и вернуть его как строку.",
         "parameters": {
@@ -437,6 +476,7 @@ TOOL_PERMISSIONS = {
     "execute_shell": "confirm",
     "git_diff": "safe",
     "run_tests": "safe",
+    "read_project_file": "safe",
     "read_source": "safe",
     "edit_source": "confirm",
     "check_syntax": "safe",
@@ -615,6 +655,12 @@ if __name__ == "__main__":
                 elif tool_call.function.name == "run_tests":
                     try:
                         result = run_tests()
+                    except Exception as e:
+                        result = f"Ошибка инструмента: {e}"
+
+                elif tool_call.function.name == "read_project_file":
+                    try:
+                        result = read_project_file(arguments["path"])
                     except Exception as e:
                         result = f"Ошибка инструмента: {e}"
 
