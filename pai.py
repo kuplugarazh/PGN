@@ -18,6 +18,9 @@ MODEL ="Qwen3-8B-Q4_K_M.gguf"
 PAI_ROOT = Path.home() / "pai"
 WORKSPACE = Path.home() / "PAIWorkspace"
 
+# Shell metacharacters that raise the permission level or are disallowed in critical commands
+SHELL_OPERATORS = (";", "&&", "||", "|", "`", "$(", ">", "<")
+
 
 client = OpenAI(
     base_url="http://127.0.0.1:8080/v1",
@@ -913,7 +916,7 @@ def shell_command_level(command: str) -> PermissionLevel:
         return PermissionLevel.CRITICAL
     if any(token.startswith(SYSTEM_PATH_PREFIXES) for token in tokens):
         return PermissionLevel.CRITICAL
-    if any(operator in command for operator in (";", "&&", "||", "|", "`", "$(", ">", "<")):
+    if any(operator in command for operator in SHELL_OPERATORS):
         return PermissionLevel.HIGH
 
     if executable == "git":
@@ -1053,7 +1056,7 @@ def critical_shell_command_is_allowed(command: str) -> bool:
     return (
         bool(tokens)
         and Path(tokens[0]).name.lower() in ALLOWED_CRITICAL_SHELL_COMMANDS
-        and not any(operator in command for operator in (";", "&&", "||", "|", "`", "$(", ">", "<"))
+        and not any(operator in command for operator in SHELL_OPERATORS)
     )
 
 
@@ -1418,8 +1421,8 @@ def compact_messages(messages: list[dict]) -> list[dict]:
         if tool_call_count >= 8:
             break
     
-    # Add user messages at the end (most recent first)
-    for msg in reversed(user_messages):
+    # Add user messages at the end (chronological, oldest first)
+    for msg in user_messages:
         compacted.append(msg)
         
     # Add recent tool pairs at the end  
@@ -1444,9 +1447,10 @@ def run_agent_turn(
 
     for step in range(1, MAX_AGENT_STEPS + 1):
        
-        print(f"\n[DEBUG] messages: {len(messages)}")
-        print(f"[DEBUG] chars: {sum(len(str(m)) for m in messages)}")       
- 
+        if os.environ.get("PAI_DEBUG"):
+            print(f"\n[DEBUG] messages: {len(messages)}")
+            print(f"[DEBUG] chars: {sum(len(str(m)) for m in messages)}")       
+  
         # Compact messages before each request to prevent overflow
         if len(messages) > 50:
             messages = compact_messages(messages)

@@ -1,3 +1,5 @@
 __pycache__/
 pai.py.backup
+*.backup
+pai_*.py
 zapret-discord-youtube-linux/
