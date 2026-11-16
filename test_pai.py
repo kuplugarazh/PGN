@@ -1,4 +1,4 @@
-from pai import read_project_file, git_diff, edit_source
+from pai_g import read_project_file, git_diff, edit_source
 
 
 def test_git_diff_returns_string():

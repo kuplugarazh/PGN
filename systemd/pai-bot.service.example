@@ -1,0 +1,17 @@
+
+[Unit]
+Description=PAI Telegram Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/pai/.env
+WorkingDirectory=%h/pai
+ExecStartPre=/usr/bin/sleep 5
+ExecStart=%h/pai/.venv/bin/python %h/pai/bot.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target

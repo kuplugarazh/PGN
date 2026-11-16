@@ -1,7 +1,7 @@
 import json
 from types import SimpleNamespace
 
-import pai
+import pai_g as pai
 
 
 def test_read_and_low_permissions_are_automatic(monkeypatch):
@@ -17,6 +17,11 @@ def test_read_and_low_permissions_are_automatic(monkeypatch):
         pai.PermissionLevel.LOW,
         None,
     )
+    assert pai.authorize_tool("write_file", {"path": "note.txt", "content": "x"}) == (
+        True,
+        pai.PermissionLevel.LOW,
+        None,
+    )
 
 
 def test_medium_permission_requires_confirmation(monkeypatch):
@@ -27,12 +32,12 @@ def test_medium_permission_requires_confirmation(monkeypatch):
         lambda tool, arguments, level: observed.append((tool, arguments, level)) or False,
     )
 
-    allowed, level, reason = pai.authorize_tool("write_file", {"path": "note.txt", "content": "x"})
+    allowed, level, reason = pai.authorize_tool("package_manager", {})
 
     assert not allowed
     assert level == pai.PermissionLevel.MEDIUM
     assert reason == "Операция отменена пользователем."
-    assert observed == [("write_file", {"path": "note.txt", "content": "x"}, pai.PermissionLevel.MEDIUM)]
+    assert observed == [("package_manager", {}, pai.PermissionLevel.MEDIUM)]
 
 
 def test_unknown_tool_or_permission_is_denied(monkeypatch):
@@ -128,10 +133,10 @@ def test_unapproved_critical_shell_remains_blocked_after_confirmation(monkeypatc
 
 def test_shell_levels_are_argument_sensitive():
     assert pai.shell_command_level("pwd") == pai.PermissionLevel.READ
-    assert pai.shell_command_level("touch temporary.txt") == pai.PermissionLevel.LOW
+    assert pai.shell_command_level("touch temporary.txt") == pai.PermissionLevel.MEDIUM
     assert pai.shell_command_level("rm temporary.txt") == pai.PermissionLevel.HIGH
-    assert pai.shell_command_level("git status") == pai.PermissionLevel.READ
-    assert pai.shell_command_level("git commit -m test") == pai.PermissionLevel.HIGH
-    assert pai.shell_command_level("sed -i s/a/b/ note.txt") == pai.PermissionLevel.HIGH
+    assert pai.shell_command_level("git status") == pai.PermissionLevel.MEDIUM
+    assert pai.shell_command_level("git commit -m test") == pai.PermissionLevel.MEDIUM
+    assert pai.shell_command_level("sed -i s/a/b/ note.txt") == pai.PermissionLevel.MEDIUM
     assert pai.shell_command_level("find . -delete") == pai.PermissionLevel.HIGH
     assert pai.shell_command_level("sudo true") == pai.PermissionLevel.CRITICAL
