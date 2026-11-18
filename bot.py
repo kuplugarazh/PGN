@@ -1,9 +1,15 @@
-import uuid
 import asyncio
 import html
 import os
 import time
+import uuid
+from pathlib import Path
+
 import httpx
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env")
+
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import (
@@ -14,19 +20,18 @@ from aiogram.types import (
     Message,
 )
 
-import pai_g as pai  # Импортируем твой pai_g.py
+import pai_g as pai
 
-# Безопасно читаем токен из переменных окружения (больше не хардкодим в файле!)
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN")
+BOT_TOKEN = (os.environ.get("TELEGRAM_BOT_TOKEN") or os.environ.get("BOT_TOKEN") or "").strip().strip("'\"")
 if not BOT_TOKEN:
     raise ValueError("Ошибка: не задана переменная окружения TELEGRAM_BOT_TOKEN или BOT_TOKEN!")
 
-allowed_user_id_str = os.environ.get("TELEGRAM_ALLOWED_USER_ID") or os.environ.get("ALLOWED_USER_ID")
+allowed_user_id_str = (os.environ.get("TELEGRAM_ALLOWED_USER_ID") or os.environ.get("ALLOWED_USER_ID") or "").strip()
 if not allowed_user_id_str:
     raise ValueError("Ошибка: не задана переменная окружения TELEGRAM_ALLOWED_USER_ID или ALLOWED_USER_ID!")
 ALLOWED_USER_ID = int(allowed_user_id_str)
 
-MAX_USER_TURNS = 3           # Сброс чата каждые 3 твоих запроса
+MAX_USER_TURNS = 10          # Количество запросов пользователя до автосброса диалога (при длинных цепочках работает compact_messages)
 IDLE_TIMEOUT_SEC = 600       # Выгружать llama-server из VRAM через 10 минут тишины
 SERVER_STARTUP_TIMEOUT = 90  # Макс. время ожидания холодного старта модели (сек)
 
@@ -42,7 +47,7 @@ agent_lock = asyncio.Lock()
 
 # Мосты для синхронного потока pai_g.py -> asyncio Telegram
 main_loop: asyncio.AbstractEventLoop | None = None
-pending_confirm_future: asyncio.Future | None = None
+pending_confirm_futures: dict[str, asyncio.Future] = {}
 
 
 def reset_chat_context() -> None:
@@ -110,14 +115,14 @@ def request_soft_cancel() -> bool:
     if not agent_lock.locked():
         return False
     pai.CANCEL_EVENT.set()
-    if pending_confirm_future and not pending_confirm_future.done():
-        pending_confirm_future.set_result(False)
+    for fut in list(pending_confirm_futures.values()):
+        if not fut.done():
+            fut.set_result(False)
     return True
 
 
-pending_confirm_futures: dict[str, asyncio.Future] = {}
-
 def tg_confirm_bridge(tool_name: str, arguments: dict, level: pai.PermissionLevel) -> bool:
+    """Мост из синхронного потока pai_g.py в асинхронные кнопки Telegram."""
     global last_activity
     last_activity = time.time()
     action = html.escape(pai.confirmation_text(tool_name, arguments))
@@ -132,7 +137,7 @@ def tg_confirm_bridge(tool_name: str, arguments: dict, level: pai.PermissionLeve
         ]])
         await bot.send_message(
             ALLOWED_USER_ID,
-            f"⚠️ <b>PAI запрашивает подтверждение [{level.value}]</b>:\n<code>{action}</code>",
+            f"⚠️ <b>PGN запрашивает подтверждение [{level.value}]</b>:\n<code>{action}</code>",
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -147,6 +152,25 @@ def tg_confirm_bridge(tool_name: str, arguments: dict, level: pai.PermissionLeve
     result = future.result()
     last_activity = time.time()
     return result
+
+
+def tg_send_photo_bridge(file_path: str, caption: str) -> bool:
+    """Мост для мгновенной отправки скриншота из pai_g.py в Telegram."""
+    async def _send() -> bool:
+        await bot.send_photo(
+            ALLOWED_USER_ID,
+            photo=FSInputFile(file_path),
+            caption=caption,
+        )
+        return True
+
+    future = asyncio.run_coroutine_threadsafe(_send(), main_loop)
+    return future.result(timeout=30.0)
+
+
+pai.CONFIRM_CALLBACK = tg_confirm_bridge
+pai.SEND_PHOTO_CALLBACK = tg_send_photo_bridge
+
 
 @dp.callback_query(F.from_user.id == ALLOWED_USER_ID, F.data.startswith(("conf_yes_", "conf_no_")))
 async def on_confirm_callback(call: CallbackQuery) -> None:
@@ -176,6 +200,7 @@ async def on_confirm_callback(call: CallbackQuery) -> None:
         )
     await call.answer()
 
+
 @dp.callback_query(F.from_user.id == ALLOWED_USER_ID, F.data == "cancel_task")
 async def on_cancel_callback(call: CallbackQuery) -> None:
     if request_soft_cancel():
@@ -185,11 +210,10 @@ async def on_cancel_callback(call: CallbackQuery) -> None:
         await call.answer("Задача уже завершена.", show_alert=False)
 
 
-# Добавлено: F.chat.type == "private" для всех обработчиков ниже
 @dp.message(F.from_user.id == ALLOWED_USER_ID, F.chat.type == "private", Command("new"))
 async def cmd_new(message: Message) -> None:
     reset_chat_context()
-    await message.answer(f"🧹 Контекст PAI полностью очищен (0/{MAX_USER_TURNS}).")
+    await message.answer(f"🧹 Контекст PGN полностью очищен (0/{MAX_USER_TURNS}).")
 
 
 @dp.message(F.from_user.id == ALLOWED_USER_ID, F.chat.type == "private", Command("stop"))
@@ -239,13 +263,12 @@ async def handle_user_message(message: Message) -> None:
 
         user_turns_count += 1
         messages.append({"role": "user", "content": message.text})
-        task_state = pai.TaskState.for_goal(message.text) if pai.needs_workflow(message.text) else None
 
         try:
-            await asyncio.to_thread(pai.run_agent_turn, messages, 0, task_state)
+            await asyncio.to_thread(pai.run_agent_turn, messages, 0)
             raw_reply = pai.LAST_REPLY or "(пустой ответ)"
         except Exception as e:
-            raw_reply = f"Ошибка выполнения PAI: {e}"
+            raw_reply = f"Ошибка выполнения PGN: {e}"
         finally:
             last_activity = time.time()
 
@@ -268,6 +291,8 @@ async def handle_user_message(message: Message) -> None:
 async def main() -> None:
     global main_loop
     main_loop = asyncio.get_running_loop()
+    pai.CONFIRM_CALLBACK = tg_confirm_bridge
+    pai.SEND_PHOTO_CALLBACK = tg_send_photo_bridge
     await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 

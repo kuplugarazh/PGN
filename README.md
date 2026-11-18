@@ -1,5 +1,4 @@
-# 🐦 Pigeon General Network (PGN)
-
+🐦 Pigeon General Network (PGN)
 **Your Linux. Your AI. Your Pigeon.**
 
 Pigeon General Network (PGN) is a personal AI environment for Linux. It connects a local language model to system tools, allowing an AI agent to interact with the operating system, manage files, control the desktop, and assist with software development.
